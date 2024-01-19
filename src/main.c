@@ -31,7 +31,7 @@ int main(void) {
 
     // Check if A1 pressed and increment the counter
     if ((GPIOA->IDR & (1<<1))==0){
-      while((GPIOA->IDR & (1<<1))==0){}
+      while((GPIOA->IDR & (1<<1))==0){}// Add displayHex(counter) in the while to let the value persist on the display
       counter++;
     }
     // Check if A2 pressed and decrement the counter
@@ -60,7 +60,7 @@ void Reg_Init() {
   GPIOB->MODER |= (1<<(5*2));
   GPIOB->PUPDR &= ~(3<<(5*2));
   GPIOB->OSPEEDR |= (3<<(5*2));
-  // Set to initially 1
+  // Set to 1 initially
   GPIOB->ODR |= (1<<(5));
 
   // Clock
@@ -68,8 +68,9 @@ void Reg_Init() {
   GPIOA->MODER |= (1<<(8*2));
   GPIOA->PUPDR &= ~(3<<(8*2));
   GPIOA->OSPEEDR |= (3<<(8*2));
-  // Set to initially 0
+  // Set to 0 initially
   GPIOA->ODR &= ~(1<<(8));
+
   // SDI / DO
   GPIOA->MODER &= ~(3<<(9*2));
   GPIOA->MODER |= (1<<(9*2));
@@ -89,14 +90,9 @@ void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t value
       GPIOA->ODR |= (1 << 9);
     } else {
       GPIOA->ODR &= ~(1 << 9);
-    }
-      // // Set and reset
-      // GPIOA->ODR |= (1 << 8);
-      // GPIOA->ODR &= ~(1 << 8);
-    
+    }    
 
-    // Pulse clock
-    // Set and reset
+    // Pulse clock (set and reset)
     GPIOA->ODR |= (1 << 8);
     GPIOA->ODR &= ~(1 << 8);
 
@@ -107,16 +103,16 @@ void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t value
 
 void sendToSeg(uint8_t segNo, uint8_t hexVal)
 {
-  /* Make Latch pin Low */
+  // Latch down (low)
   GPIOB->ODR &= ~(1<<5);
 
 
-  /* Transfer Segmenent data */
+  // Transfer Segmenent data
   shiftOut(DATA_PIN, CLOCK_PIN, 1, hexVal);
-    /* Transfer Segmenent Number  */
+  // Transfer Segmenent data
   shiftOut(DATA_PIN, CLOCK_PIN, 1, segNo);
 
-    /* Make Latch pin High so the data appear on Latch parallel pins */
+  // Latch up (high) 
   GPIOB->ODR |= (1<<5);
 }
 
