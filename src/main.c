@@ -1,282 +1,249 @@
 #include "stm32f4xx_hal.h"
-#include <math.h>
-#define DATA_PIN GPIO_PIN_9
-#define CLOCK_PIN GPIO_PIN_8
+#include "stm32f4xx_hal_i2c.h"
+#include "stdio.h"
 
-ADC_HandleTypeDef hadc1;
+#define LED_PIN_1 GPIO_PIN_5
+#define LED_PIN_2 GPIO_PIN_6
+#define LED_PIN_3 GPIO_PIN_7
+#define LED_PIN_4 GPIO_PIN_6
 
-void Reg_Init();
-void sendToSeg(uint8_t segNo, uint8_t hexVal);
-void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t value);
-void displayHex(uint16_t hexValue);
-static void SystemClock_Config(void);
-void Error_Handler(void);
-
-const uint8_t C_HEX = 0xC6;
-const uint8_t TWO_HEX = 0xA4;
-const uint8_t P_HEX = 0x8C;
-uint8_t patterns[16] = {0xC0, 0xF9, 0xA4, 0xB0, 0x99, 0x92, 0x82, 0xF8, 0x80, 0x90, 0x88, 0x83, 0xC6, 0xA1, 0x84, 0x8E};
-
-uint8_t select_seg1 = 0xF1;
-uint8_t select_seg2 = 0xF2;
-uint8_t select_seg3 = 0xF4;
-uint8_t select_seg4 = 0xF8;
-// uint16_t counter;
-
-const uint8_t SEGMENT_SELECT[] = {0xF1, 0xF2, 0xF4, 0xF8};
-
-
-volatile uint16_t adcValue;
-
-// ISR for ADC conversion complete
-// void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
-// {
-//   // Read ADC value
-//   adcValue = HAL_ADC_GetValue(hadc);
-
-//   // Display ADC value on 7-segment display
-//   displayHex(adcValue);
-// }
-
-int main(void)
-{
-  HAL_Init();
-  SystemClock_Config();
-  Reg_Init();
-  __HAL_RCC_ADC1_CLK_ENABLE();
-
-  // Initialize ADC
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    // Initialization Error
-    Error_Handler();
-  }
-
-  // Configure ADC channel
-  ADC_ChannelConfTypeDef sConfig = {0};
-  sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    // Configuration Error
-    Error_Handler();
-  }
-
-  // Start ADC conversion
-  if (HAL_ADC_Start(&hadc1) != HAL_OK)
-  {
-    // ADC Start Error
-    Error_Handler();
-  }
-  // uint16_t adcValue;
-  while (1)
-  {
-    // displayHex(adcValue);
-    // Wait for ADC conversion to complete
-    HAL_ADC_Start(&hadc1);
-    if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK)
-    {
-      // Read ADC value
-      adcValue = HAL_ADC_GetValue(&hadc1);
-      displayHex(adcValue);
-      // Display ADC value on 7-segment display
-    }
-    // displayHex(adcValue);
-
-    // adcValue = HAL_ADC_GetValue(&hadc1);
-
-    // displayHex(adcValue);
-
-  }
-}
-
-void Reg_Init()
-{
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  // Chip Select
-  GPIOB->MODER &= ~(3 << (5 * 2));
-  GPIOB->MODER |= (1 << (5 * 2));
-  GPIOB->PUPDR &= ~(3 << (5 * 2));
-  GPIOB->OSPEEDR |= (3 << (5 * 2));
-  // Set to 1 initially
-  GPIOB->ODR |= (1 << (5));
-
-  // Clock
-  GPIOA->MODER &= ~(3 << (8 * 2));
-  GPIOA->MODER |= (1 << (8 * 2));
-  GPIOA->PUPDR &= ~(3 << (8 * 2));
-  GPIOA->OSPEEDR |= (3 << (8 * 2));
-  // Set to 0 initially
-  GPIOA->ODR &= ~(1 << (8));
-
-  // SDI / DO
-  GPIOA->MODER &= ~(3 << (9 * 2));
-  GPIOA->MODER |= (1 << (9 * 2));
-  GPIOA->PUPDR &= ~(3 << (9 * 2));
-  GPIOA->OSPEEDR |= (3 << (9 * 2));
-
-  // Additional ADC GPIO configuration (Potentiometer at A0)
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-}
-
-void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t value)
-{
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    // MSBFIRST: Send the most significant bit (MSB) first, here as input 1
-    // LSBFIRST: Send the least significant bit (LSB) first, here as input 0
-    uint8_t bit = (bitOrder == 1) ? ((value & 0x80) >> 7) : (value & 0x01);
-
-    // Set data pin
-    if (bit == 1)
-    {
-      GPIOA->ODR |= (1 << 9);
-    }
-    else
-    {
-      GPIOA->ODR &= ~(1 << 9);
-    }
-
-    // Pulse clock (set and reset)
-    GPIOA->ODR |= (1 << 8);
-    GPIOA->ODR &= ~(1 << 8);
-
-    // Shift value to the next bit
-    value = (bitOrder == 1) ? (value << 1) : (value >> 1);
-  }
-}
-
-void sendToSeg(uint8_t segNo, uint8_t hexVal)
-{
-  // Latch down (low)
-  GPIOB->ODR &= ~(1 << 5);
-
-  // Transfer Segmenent data
-  shiftOut(DATA_PIN, CLOCK_PIN, 1, hexVal);
-  // Transfer Segmenent data
-  shiftOut(DATA_PIN, CLOCK_PIN, 1, segNo);
-
-  // Latch up (high)
-  GPIOB->ODR |= (1 << 5);
-}
-
-void displayHex(uint16_t hexValue)
-{
-  // Scale ADC value to voltage (assuming a 3.3V reference)
-  float voltage = (hexValue / 4095.0) * 3300.0;
-
-  // Extract individual digits
-  uint8_t digit1 = voltage / 1000;
-  uint8_t digit2 = ((int)voltage / 100) % 10;
-  uint8_t digit3 = ((int)voltage / 10) % 10;
-  uint8_t digit4 = (int)voltage % 10;
-
-  // Display each digit on the 7-segment display
-  sendToSeg(select_seg1, patterns[digit1] & 0b01111111);
-  sendToSeg(select_seg2, patterns[digit2]);
-  sendToSeg(select_seg3, patterns[digit3]);
-  sendToSeg(select_seg4, patterns[digit4]);
-
-  // // Extract individual digits
-  // uint8_t digit4 = (hexValue >> 12) & 0xF;
-  // uint8_t digit3 = (hexValue >> 8) & 0xF;
-  // uint8_t digit2 = (hexValue >> 4) & 0xF;
-  // uint8_t digit1 = hexValue & 0xF;
-
-  // // Display each digit on the 7-segment display
-  // sendToSeg(select_seg1, patterns[digit4]);
-  // sendToSeg(select_seg2, patterns[digit3]);
-  // sendToSeg(select_seg3, patterns[digit2]);
-  // sendToSeg(select_seg4, patterns[digit1]);
-}
+void LED_Init();
+void Sen_Init();
 
 void SysTick_Handler(void)
 {
-  HAL_IncTick();
+    HAL_IncTick();
 }
 
-static void SystemClock_Config(void)
+const uint8_t BH1750_POWER_ON = 0x01;
+const uint8_t BH1750_RESET = 0x07;
+const uint8_t BH1750_CONTINUOUS_HIGH_RES_MODE = 0x10;
+
+void displayLux(float percentage)
 {
-  RCC_ClkInitTypeDef RCC_ClkInitStruct;
-  RCC_OscInitTypeDef RCC_OscInitStruct;
-  HAL_StatusTypeDef ret = HAL_OK;
+    if (percentage < 0.2f)
+    {
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_1, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_2, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_3, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOB, LED_PIN_4, GPIO_PIN_SET);
 
-  /* Enable Power Control clock */
-  __HAL_RCC_PWR_CLK_ENABLE();
+        GPIOA->ODR |= (1 << 5);
+        GPIOA->ODR |= (1 << 6);
+        GPIOA->ODR |= (1 << 7);
+        GPIOB->ODR |= (1 << 6);
 
-  /* The voltage scaling allows optimizing the power consumption when the device is 
-     clocked below the maximum system frequency, to update the voltage scaling value 
-     regarding system frequency refer to product datasheet.  */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+    }
+    else if (percentage >= 0.2f && percentage < 0.4f)
+    {
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_1, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_2, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_3, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOB, LED_PIN_4, GPIO_PIN_RESET);
 
-  /* Enable HSE Oscillator and activate PLL with HSE as source */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 360;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
-  RCC_OscInitStruct.PLL.PLLR = 2;
-  
-  ret = HAL_RCC_OscConfig(&RCC_OscInitStruct);
-  if(ret != HAL_OK)
-  {
-    while(1) { ; }
-  }
-  
-  /* Activate the OverDrive to reach the 180 MHz Frequency */  
-  ret = HAL_PWREx_EnableOverDrive();
-  if(ret != HAL_OK)
-  {
-    while(1) { ; }
-  }
-  
-  /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2 clocks dividers */
-  RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;  
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;  
-  
-  ret = HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
-  if(ret != HAL_OK)
-  {
-    while(1) { ; }
-  }
+        GPIOA->ODR |= (1 << 5);
+        GPIOA->ODR |= (1 << 6);
+        GPIOA->ODR |= (1 << 7);
+        GPIOB->ODR &= ~(1 << 6);
+    }
+    else if (percentage >= 0.4f && percentage < 0.6f)
+    {
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_1, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_2, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_3, GPIO_PIN_RESET);
+        // HAL_GPIO_WritePin(GPIOB, LED_PIN_4, GPIO_PIN_RESET);
+
+        GPIOA->ODR |= (1 << 5);
+        GPIOA->ODR |= (1 << 6);
+        GPIOA->ODR &= ~(1 << 7);
+        GPIOB->ODR &= ~(1 << 6);
+    }
+    else if (percentage >= 0.6f && percentage < 0.8f)
+    {
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_1, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_2, GPIO_PIN_RESET);
+        // HAL_GPIO_WritePin(GPIOA, LED_PIN_3, GPIO_PIN_RESET);
+        // HAL_GPIO_WritePin(GPIOB, LED_PIN_4, GPIO_PIN_RESET);
+
+        GPIOA->ODR |= (1 << 5);
+        GPIOA->ODR &= ~(1 << 6);
+        GPIOA->ODR &= ~(1 << 7);
+        GPIOB->ODR &= ~(1 << 6);
+    }
+    else if (percentage >= 0.8f)
+    {
+    //     HAL_GPIO_WritePin(GPIOA, LED_PIN_1, GPIO_PIN_RESET);
+    //     HAL_GPIO_WritePin(GPIOA, LED_PIN_2, GPIO_PIN_RESET);
+    //     HAL_GPIO_WritePin(GPIOA, LED_PIN_3, GPIO_PIN_RESET);
+    //     HAL_GPIO_WritePin(GPIOB, LED_PIN_4, GPIO_PIN_RESET);
+
+        GPIOA->ODR &= ~(1 << 5);
+        GPIOA->ODR &= ~(1 << 6);
+        GPIOA->ODR &= ~(1 << 7);
+        GPIOB->ODR &= ~(1 << 6);
+    }
 }
 
-void Error_Handler(void)
+int main(void)
 {
-  // User-specific error handling code
-  while (1)
-  {
-    // Toggle the LED on and off to indicate an error
-    HAL_GPIO_TogglePin(GPIOA, 5);
+    HAL_Init();
 
-    // Insert a delay to make the blinking visible
-    HAL_Delay(500);
-  }
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_I2C1_CLK_ENABLE();
+
+    LED_Init();
+    Sen_Init();
+
+    I2C_HandleTypeDef hI2C;
+    hI2C.Instance = I2C1;
+    hI2C.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hI2C.Init.OwnAddress1 = 0;
+    hI2C.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hI2C.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hI2C.Init.OwnAddress2 = 0;
+    hI2C.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hI2C.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+
+    if (HAL_I2C_Init(&hI2C) != HAL_OK)
+    {
+        return 0;
+    }
+
+    uint8_t addr = 0x23<<1;// 0u;
+
+    uint8_t buff[2];
+
+    // for (uint8_t address = 0x03u; address < 0x78u; address++)
+    // {
+    //     if (HAL_I2C_IsDeviceReady(&hI2C, address << 1, 3, 10) == HAL_OK)
+    //     {
+    //         addr = address;
+    //     }
+    // }
+
+    uint16_t nLUX = 0;
+    uint8_t *pBuffer = (uint8_t *)&nLUX;
+
+    // Continously H Res
+    buff[0] = 0b00010000;
+    pBuffer[0] = 0b00010000;
+
+    HAL_I2C_Master_Transmit(&hI2C, addr, pBuffer, 1, HAL_MAX_DELAY);
+    HAL_Delay(150);
+
+    while (1) {
+      HAL_I2C_Master_Receive(&hI2C, addr, pBuffer, 2, HAL_MAX_DELAY);
+      
+      float grade = nLUX / 65535.0f;
+      HAL_Delay(150);
+
+      displayLux(grade);
+    }
+
+    // if (addr != 0)
+    // {
+    //     pBuffer[0] = BH1750_POWER_ON;
+    //     if (HAL_I2C_Master_Transmit(&hI2C, addr << 1, pBuffer, 1, 100) != HAL_OK)
+    //     {
+    //         return 1;
+    //     }
+    //     HAL_Delay(5);
+
+    //     pBuffer[0] = BH1750_RESET;
+    //     if (HAL_I2C_Master_Transmit(&hI2C, addr << 1, pBuffer, 1, 100) != HAL_OK)
+    //     {
+    //         return 1;
+    //     }
+
+    //     pBuffer[0] = BH1750_CONTINUOUS_HIGH_RES_MODE;
+    //     if (HAL_I2C_Master_Transmit(&hI2C, addr << 1, pBuffer, 1, 100) != HAL_OK)
+    //     {
+    //         return 1;
+    //     }
+    //     HAL_Delay(180);
+
+    //     while (1)
+    //     {
+    //         // Read measurement
+    //         if (HAL_I2C_Master_Receive(&hI2C, addr << 1, pBuffer, 2, 100) != HAL_OK)
+    //             continue;
+
+    //         float grade = nLUX / 65535.0f;
+    //         HAL_Delay(120);
+    //         displayLux(grade);
+    //     }
+    // }
+
+    while (1)
+    {
+
+    }
+}
+
+void Sen_Init()
+{
+    GPIO_InitTypeDef GPIO_InitStruct;
+    GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FAST;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
+
+// void LED_Init_A(int N)
+// {
+//     GPIOA->MODER &= ~(3 << (N * 2)); // mode[1:0] für pin N zurücksetzen
+//     GPIOA->MODER |= (1 << (N * 2));  // mode[1:0] für pin N auf 01 (GP output) setzen
+
+//     GPIOA->OTYPER &= ~(1 << N); // type für pin N zurücksetzen (push-pull)
+
+//     GPIOA->OSPEEDR &= ~(3 << (N * 2)); // speed[1:0] für pin N zurücksetzen (low speed)
+
+//     GPIOA->PUPDR &= ~(3 << (N * 2)); // pupdr[1:0] für pin N zurücksetzen (GP output + push-pull)
+// }
+
+// void LED_Init_B(int N)
+// {
+//     GPIOB->MODER &= ~(3 << (N * 2)); // mode[1:0] für pin N zurücksetzen
+//     GPIOB->MODER |= (1 << (N * 2));  // mode[1:0] für pin N auf 01 (GP output) setzen
+
+//     GPIOB->OTYPER &= ~(1 << N); // type für pin N zurücksetzen (push-pull)
+
+//     GPIOB->OSPEEDR &= ~(3 << (N * 2)); // speed[1:0] für pin N zurücksetzen (low speed)
+
+//     GPIOB->PUPDR &= ~(3 << (N * 2)); // pupdr[1:0] für pin N zurücksetzen (GP output + push-pull)
+// }
+
+void LED_Init()
+{
+    // LED_Init_A(5);
+    // LED_Init_A(6);
+    // LED_Init_A(7);
+    // LED_Init_B(6);
+  GPIOA->MODER &= ~(3 << (5 * 2));
+  GPIOA->MODER |= (1 << (5 * 2));
+  GPIOA->PUPDR &= ~(3 << (5 * 2));
+  GPIOA->OSPEEDR &= ~(3 << (5 * 2));
+  // Set up D2
+  GPIOA->MODER &= ~(3 << (6 * 2));
+  GPIOA->MODER |= (1 << (6 * 2));
+  GPIOA->PUPDR &= ~(3 << (6 * 2));
+  GPIOA->OSPEEDR &= ~(3 << (6 * 2));
+  // Set up D3
+  GPIOA->MODER &= ~(3 << (7 * 2));
+  GPIOA->MODER |= (1 << (7 * 2));
+  GPIOA->PUPDR &= ~(3 << (7 * 2));
+  GPIOA->OSPEEDR &= ~(3 << (7 * 2));
+  // Set up D4
+  GPIOB->MODER &= ~(3 << (6 * 2));
+  GPIOB->MODER |= (1 << (6 * 2));
+  GPIOB->PUPDR &= ~(3 << (6 * 2));
+  GPIOB->OSPEEDR &= ~(3 << (6 * 2));
+  // Turn on all LEDS  (AT THE START THEY'RE ALL ON EXPECT D4 THEN THEY START TURNING OFF SEQUENTIALLY AND IN THE NEXT CYCLE THEY TURN ON AS EXPECTED)
+  GPIOA->ODR &= ~(1 << 5);
+  GPIOA->ODR &= ~(1 << 6);
+  GPIOA->ODR &= ~(1 << 7);
+  GPIOB->ODR &= ~(1 << 6);
 }
