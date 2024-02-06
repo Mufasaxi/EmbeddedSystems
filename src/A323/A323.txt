@@ -9,6 +9,8 @@ void Reg_Init();
 void sendToSeg(uint8_t segNo, uint8_t hexVal);
 void shiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint8_t value);
 void displayHex(uint16_t hexValue);
+static void SystemClock_Config(void);
+void Error_Handler(void);
 
 const uint8_t C_HEX = 0xC6;
 const uint8_t TWO_HEX = 0xA4;
@@ -19,7 +21,7 @@ uint8_t select_seg1 = 0xF1;
 uint8_t select_seg2 = 0xF2;
 uint8_t select_seg3 = 0xF4;
 uint8_t select_seg4 = 0xF8;
-uint16_t counter;
+// uint16_t counter;
 
 const uint8_t SEGMENT_SELECT[] = {0xF1, 0xF2, 0xF4, 0xF8};
 
@@ -27,24 +29,25 @@ const uint8_t SEGMENT_SELECT[] = {0xF1, 0xF2, 0xF4, 0xF8};
 volatile uint16_t adcValue;
 
 // ISR for ADC conversion complete
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
-{
-  // Read ADC value
-  adcValue = HAL_ADC_GetValue(hadc);
+// void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+// {
+//   // Read ADC value
+//   adcValue = HAL_ADC_GetValue(hadc);
 
-  // Display ADC value on 7-segment display
-  displayHex(adcValue);
-}
+//   // Display ADC value on 7-segment display
+//   displayHex(adcValue);
+// }
 
 int main(void)
 {
   HAL_Init();
+  SystemClock_Config();
   Reg_Init();
   __HAL_RCC_ADC1_CLK_ENABLE();
 
   // Initialize ADC
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
@@ -82,20 +85,22 @@ int main(void)
   // uint16_t adcValue;
   while (1)
   {
+    // displayHex(adcValue);
     // Wait for ADC conversion to complete
-    // if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
-    // {
-    //   // Read ADC value
-    //   adcValue = HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK)
+    {
+      // Read ADC value
+      adcValue = HAL_ADC_GetValue(&hadc1);
+      displayHex(adcValue);
+      // Display ADC value on 7-segment display
+    }
+    // displayHex(adcValue);
 
-    //   // Display ADC value on 7-segment display
-    // }
-    adcValue = HAL_ADC_GetValue(&hadc1);
+    // adcValue = HAL_ADC_GetValue(&hadc1);
 
-    displayHex(adcValue);
+    // displayHex(adcValue);
 
-    // Introduce a small delay to avoid rapid updates
-    // HAL_Delay(50);
   }
 }
 
@@ -125,7 +130,7 @@ void Reg_Init()
   GPIOA->PUPDR &= ~(3 << (9 * 2));
   GPIOA->OSPEEDR |= (3 << (9 * 2));
 
-  // Additional ADC GPIO configuration (A0)
+  // Additional ADC GPIO configuration (Potentiometer at A0)
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
@@ -187,23 +192,12 @@ void displayHex(uint16_t hexValue)
   uint8_t digit3 = ((int)voltage / 10) % 10;
   uint8_t digit4 = (int)voltage % 10;
 
-  // Debug prints
-  printf("ADC Value: %u, Voltage: %.2fV, Digits: %u %u %u %u\n", hexValue, voltage, digit1, digit2, digit3, digit4);
-
   // Display each digit on the 7-segment display
   sendToSeg(select_seg1, patterns[digit1] & 0b01111111);
   sendToSeg(select_seg2, patterns[digit2]);
   sendToSeg(select_seg3, patterns[digit3]);
   sendToSeg(select_seg4, patterns[digit4]);
 
-  // Debug prints
-  printf("ADC Value: %u, Voltage: %.2fV, Digits: %u %u %u %u\n", hexValue, voltage, digit1, digit2, digit3, digit4);
-
-  // Display each digit on the 7-segment display
-  sendToSeg(select_seg1, patterns[digit1]);
-  sendToSeg(select_seg2, patterns[digit2]);
-  sendToSeg(select_seg3, patterns[digit3]);
-  sendToSeg(select_seg4, patterns[digit4]);
   // // Extract individual digits
   // uint8_t digit4 = (hexValue >> 12) & 0xF;
   // uint8_t digit3 = (hexValue >> 8) & 0xF;
@@ -216,17 +210,67 @@ void displayHex(uint16_t hexValue)
   // sendToSeg(select_seg3, patterns[digit2]);
   // sendToSeg(select_seg4, patterns[digit1]);
 }
+
 void SysTick_Handler(void)
 {
   HAL_IncTick();
 }
 
+static void SystemClock_Config(void)
+{
+  RCC_ClkInitTypeDef RCC_ClkInitStruct;
+  RCC_OscInitTypeDef RCC_OscInitStruct;
+  HAL_StatusTypeDef ret = HAL_OK;
+
+  /* Enable Power Control clock */
+  __HAL_RCC_PWR_CLK_ENABLE();
+
+  /* The voltage scaling allows optimizing the power consumption when the device is 
+     clocked below the maximum system frequency, to update the voltage scaling value 
+     regarding system frequency refer to product datasheet.  */
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  /* Enable HSE Oscillator and activate PLL with HSE as source */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 360;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLR = 2;
+  
+  ret = HAL_RCC_OscConfig(&RCC_OscInitStruct);
+  if(ret != HAL_OK)
+  {
+    while(1) { ; }
+  }
+  
+  /* Activate the OverDrive to reach the 180 MHz Frequency */  
+  ret = HAL_PWREx_EnableOverDrive();
+  if(ret != HAL_OK)
+  {
+    while(1) { ; }
+  }
+  
+  /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2 clocks dividers */
+  RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;  
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;  
+  
+  ret = HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5);
+  if(ret != HAL_OK)
+  {
+    while(1) { ; }
+  }
+}
+
 void Error_Handler(void)
 {
   // User-specific error handling code
-  // For example, turn on an LED or log the error
-
-  // In this example, let's blink the LED on pin LD2 (assuming it's defined in your code)
   while (1)
   {
     // Toggle the LED on and off to indicate an error
